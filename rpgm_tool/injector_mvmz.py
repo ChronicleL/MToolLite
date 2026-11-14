@@ -34,6 +34,17 @@ _PLUGIN_JS_TEMPLATE = r"""//====================================================
 
     let dict = {};
     const captured = {};
+    const translatedValues = new Set();
+
+    function updateTranslatedValues() {
+        translatedValues.clear();
+        for (const k of Object.keys(dict)) {
+            const v = dict[k];
+            if (typeof v === "string" && v.length > 0 && v !== "__FILTERED__") {
+                translatedValues.add(v);
+            }
+        }
+    }
 
     function loadDictionarySync() {
         const candidates = ["data/ManualTransFile.json", "www/data/ManualTransFile.json", "ManualTransFile.json"];
@@ -47,6 +58,7 @@ _PLUGIN_JS_TEMPLATE = r"""//====================================================
                     try {
                         const raw = fs.readFileSync(full, "utf8").replace(/^\uFEFF/, "");
                         dict = JSON.parse(raw);
+                        updateTranslatedValues();
                         return;
                     } catch (e) {
                         console.error("[MToolLite] Failed to parse dictionary:", full, e);
@@ -62,6 +74,7 @@ _PLUGIN_JS_TEMPLATE = r"""//====================================================
                 xhr.send(null);
                 if (xhr.status === 200 || xhr.status === 0) {
                     dict = JSON.parse(xhr.responseText.replace(/^\uFEFF/, ""));
+                    updateTranslatedValues();
                     return;
                 }
             } catch (_) {
@@ -85,9 +98,12 @@ _PLUGIN_JS_TEMPLATE = r"""//====================================================
         if (typeof text !== "string" || !text) return text;
         if (Object.prototype.hasOwnProperty.call(dict, text)) {
             const val = dict[text];
-            if (typeof val === "string" && val.length > 0 && val !== "__FILTERED__") return val;
+            if (typeof val === "string" && val.length > 0 && val !== "__FILTERED__") {
+                translatedValues.add(val);
+                return val;
+            }
         }
-        if (captureUntranslated && /[^\x00-\x7F]/.test(text) && !Object.prototype.hasOwnProperty.call(captured, text)) {
+        if (captureUntranslated && /[^\x00-\x7F]/.test(text) && !Object.prototype.hasOwnProperty.call(captured, text) && !translatedValues.has(text)) {
             captured[text] = "";
             saveCaptured();
         }
@@ -172,16 +188,75 @@ _PLUGIN_JS_TEMPLATE = r"""//====================================================
         };
     }
 
-    const _Window_Base_convertEscapeCharacters = Window_Base.prototype.convertEscapeCharacters;
-    Window_Base.prototype.convertEscapeCharacters = function(text) {
-        return _Window_Base_convertEscapeCharacters.call(this, tr(text));
-    };
+    let inDrawTextEx = false;
 
-    if (typeof Window_Command !== "undefined" && Window_Command.prototype && Window_Command.prototype.addCommand) {
-        const _Window_Command_addCommand = Window_Command.prototype.addCommand;
-        Window_Command.prototype.addCommand = function(name, symbol, enabled, ext) {
-            return _Window_Command_addCommand.call(this, tr(name), symbol, enabled, ext);
+    if (typeof Window_Base !== "undefined" && Window_Base.prototype) {
+        const _Window_Base_convertEscapeCharacters = Window_Base.prototype.convertEscapeCharacters;
+        Window_Base.prototype.convertEscapeCharacters = function(text) {
+            return _Window_Base_convertEscapeCharacters.call(this, tr(text));
         };
+
+        if (Window_Base.prototype.drawTextEx) {
+            const _Window_Base_drawTextEx = Window_Base.prototype.drawTextEx;
+            Window_Base.prototype.drawTextEx = function(text, x, y, width) {
+                inDrawTextEx = true;
+                try {
+                    return _Window_Base_drawTextEx.call(this, text, x, y, width);
+                } finally {
+                    inDrawTextEx = false;
+                }
+            };
+        }
+
+        if (Window_Base.prototype.textSizeEx) {
+            const _Window_Base_textSizeEx = Window_Base.prototype.textSizeEx;
+            Window_Base.prototype.textSizeEx = function(text) {
+                inDrawTextEx = true;
+                try {
+                    return _Window_Base_textSizeEx.call(this, text);
+                } finally {
+                    inDrawTextEx = false;
+                }
+            };
+        }
+    }
+
+    if (typeof Window_Command !== "undefined" && Window_Command.prototype) {
+        if (Window_Command.prototype.addCommand) {
+            const _Window_Command_addCommand = Window_Command.prototype.addCommand;
+            Window_Command.prototype.addCommand = function(name, symbol, enabled, ext) {
+                return _Window_Command_addCommand.call(this, tr(name), symbol, enabled, ext);
+            };
+        }
+        if (Window_Command.prototype.commandName) {
+            const _Window_Command_commandName = Window_Command.prototype.commandName;
+            Window_Command.prototype.commandName = function(index) {
+                return tr(_Window_Command_commandName.call(this, index));
+            };
+        }
+    }
+
+    if (typeof Bitmap !== "undefined" && Bitmap.prototype) {
+        if (Bitmap.prototype.drawText) {
+            const _Bitmap_drawText = Bitmap.prototype.drawText;
+            Bitmap.prototype.drawText = function(text, x, y, maxWidth, lineHeight, align) {
+                if (inDrawTextEx) {
+                    return _Bitmap_drawText.call(this, text, x, y, maxWidth, lineHeight, align);
+                }
+                const translated = tr(typeof text === "string" ? text : (text == null ? "" : String(text)));
+                return _Bitmap_drawText.call(this, translated, x, y, maxWidth, lineHeight, align);
+            };
+        }
+        if (Bitmap.prototype.measureTextWidth) {
+            const _Bitmap_measureTextWidth = Bitmap.prototype.measureTextWidth;
+            Bitmap.prototype.measureTextWidth = function(text) {
+                if (inDrawTextEx) {
+                    return _Bitmap_measureTextWidth.call(this, text);
+                }
+                const translated = tr(typeof text === "string" ? text : (text == null ? "" : String(text)));
+                return _Bitmap_measureTextWidth.call(this, translated);
+            };
+        }
     }
 })();
 """

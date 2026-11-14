@@ -9,6 +9,52 @@ from pathlib import Path
 from .detector import GameInfo, detect_engine
 
 _PURE_NUMERIC_RE = re.compile(r"^[\d\s.,+\-*/%:=()\[\]]+$")
+_CODE_LIKE_RE = re.compile(
+    r"\b(?:SceneManager|AudioManager|PluginManager|ImageManager|SoundManager|DataManager|"
+    r"BattleManager|TouchInput|Graphics|Utils|\$game|\$data|function|return|var|let|const|"
+    r"eval|window|document|console|battler)\b|[;{}()]|//|=>"
+)
+_CJK_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
+
+_STANDARD_VOCAB: tuple[str, ...] = (
+    "アイテム",
+    "スキル",
+    "装備",
+    "ステータス",
+    "並び替え",
+    "セーブ",
+    "ゲーム終了",
+    "オプション",
+    "武器",
+    "防具",
+    "大事なもの",
+    "最強装備",
+    "全て外す",
+    "全て脱ぐ",
+    "クリア",
+    "ニューゲーム",
+    "コンティニュー",
+    "シャットダウン",
+    "タイトルへ",
+    "やめる",
+    "購入する",
+    "売却する",
+    "戦う",
+    "逃げる",
+    "攻撃",
+    "防御",
+    "常時ダッシュ",
+    "コマンド記憶",
+    "BGM 音量",
+    "BGS 音量",
+    "ME 音量",
+    "SE 音量",
+    "所持数",
+    "経験値",
+    "お金",
+    "はい",
+    "いいえ",
+)
 
 _SIMPLE_DB_FIELDS: dict[str, tuple[str, ...]] = {
     "Actors.json": ("name", "nickname", "profile"),
@@ -36,6 +82,37 @@ def _is_translatable(value: object) -> bool:
 def _add_if_valid(bucket: list[str], value: object) -> None:
     if _is_translatable(value):
         bucket.append(value)  # type: ignore[arg-type]
+
+
+def _extract_from_plugin_param(val: object, bucket: list[str]) -> None:
+    if not isinstance(val, str) or not val.strip():
+        return
+    val = val.strip()
+    if (val.startswith("{") and val.endswith("}")) or (val.startswith("[") and val.endswith("]")):
+        try:
+            parsed = json.loads(val)
+            if isinstance(parsed, dict):
+                for v in parsed.values():
+                    _extract_from_plugin_param(v, bucket)
+                return
+            elif isinstance(parsed, list):
+                for item in parsed:
+                    _extract_from_plugin_param(item, bucket)
+                return
+        except Exception:
+            pass
+    if _CODE_LIKE_RE.search(val):
+        return
+    if _CJK_RE.search(val):
+        if "," in val and " " not in val and not val.startswith(("-", "#")):
+            parts = val.split(",")
+            for p in parts:
+                p = p.strip()
+                if _is_translatable(p) and _CJK_RE.search(p) and not _CODE_LIKE_RE.search(p):
+                    bucket.append(p)
+        else:
+            if _is_translatable(val):
+                bucket.append(val)
 
 
 def _extract_event_list(commands: object, bucket: list[str]) -> None:
@@ -173,6 +250,25 @@ def extract_mvmz_texts(target: str | Path | GameInfo) -> list[str]:
             for anim in anims:
                 if isinstance(anim, dict):
                     _add_if_valid(collected, anim.get("name"))
+
+    # 8. plugins.js parameters
+    if info.js_dir is not None:
+        plugins_fp = info.js_dir / "plugins.js"
+        if plugins_fp.is_file():
+            try:
+                from .injector_mvmz import _parse_plugins_js
+                plugins_data = _parse_plugins_js(plugins_fp.read_text(encoding="utf-8-sig"))
+                for plugin in plugins_data:
+                    params = plugin.get("parameters")
+                    if isinstance(params, dict):
+                        for p_val in params.values():
+                            _extract_from_plugin_param(p_val, collected)
+            except Exception:
+                pass
+
+    # 9. Default RPG Maker vocabulary fallback (always included)
+    for vocab in _STANDARD_VOCAB:
+        collected.append(vocab)
 
     # Preserve order while deduplicating
     return list(dict.fromkeys(collected))
