@@ -85,7 +85,7 @@ _PLUGIN_JS_TEMPLATE = r"""//====================================================
         if (typeof text !== "string" || !text) return text;
         if (Object.prototype.hasOwnProperty.call(dict, text)) {
             const val = dict[text];
-            if (typeof val === "string" && val.length > 0) return val;
+            if (typeof val === "string" && val.length > 0 && val !== "__FILTERED__") return val;
         }
         if (captureUntranslated && /[^\x00-\x7F]/.test(text) && !Object.prototype.hasOwnProperty.call(captured, text)) {
             captured[text] = "";
@@ -176,6 +176,13 @@ _PLUGIN_JS_TEMPLATE = r"""//====================================================
     Window_Base.prototype.convertEscapeCharacters = function(text) {
         return _Window_Base_convertEscapeCharacters.call(this, tr(text));
     };
+
+    if (typeof Window_Command !== "undefined" && Window_Command.prototype && Window_Command.prototype.addCommand) {
+        const _Window_Command_addCommand = Window_Command.prototype.addCommand;
+        Window_Command.prototype.addCommand = function(name, symbol, enabled, ext) {
+            return _Window_Command_addCommand.call(this, tr(name), symbol, enabled, ext);
+        };
+    }
 })();
 """
 
@@ -220,14 +227,19 @@ def mount_mvmz(
     plugin_file = plugin_dir / f"{PLUGIN_NAME}.js"
     plugin_file.write_text(_PLUGIN_JS_TEMPLATE, encoding="utf-8")
 
-    # 2. Copy dictionary if supplied
+    # 2. Copy dictionary if supplied (sanitizing __FILTERED__ tags so game never displays literal __FILTERED__)
     target_dict = info.data_dir / "ManualTransFile.json"
     if dict_path is not None:
         src_dict = Path(dict_path)
         if not src_dict.is_file():
             raise FileNotFoundError(f"Dictionary file not found: {src_dict}")
-        if src_dict.resolve() != target_dict.resolve():
-            shutil.copy2(src_dict, target_dict)
+        try:
+            raw_dict = json.loads(src_dict.read_text(encoding="utf-8-sig"))
+            clean_dict = {k: ("" if v == "__FILTERED__" else v) for k, v in raw_dict.items()}
+            target_dict.write_text(json.dumps(clean_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            if src_dict.resolve() != target_dict.resolve():
+                shutil.copy2(src_dict, target_dict)
     elif not target_dict.exists():
         target_dict.write_text("{}", encoding="utf-8")
 

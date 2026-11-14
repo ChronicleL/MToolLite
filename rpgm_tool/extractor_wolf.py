@@ -745,7 +745,8 @@ def extract_wolf_texts(target: str | Path | GameInfo) -> list[str]:
 def mount_wolf(target: str | Path | GameInfo, dict_path: str | Path) -> list[Path]:
     """Patch Wolf RPG scenario texts, projects, .mps and .dat files with translations, backing up originals to *.mtoollite.bak."""
     info = target if isinstance(target, GameInfo) else detect_engine(target)
-    translations = load_json_dict(dict_path)
+    raw_tr = load_json_dict(dict_path)
+    translations = {k: ("" if v == "__FILTERED__" else v) for k, v in raw_tr.items()}
     data_dir = _find_wolf_data_dir(info)
     written: list[Path] = []
 

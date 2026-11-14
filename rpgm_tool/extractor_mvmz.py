@@ -156,5 +156,23 @@ def extract_mvmz_texts(target: str | Path | GameInfo) -> list[str]:
                 if isinstance(page, dict):
                     _extract_event_list(page.get("list"), collected)
 
+    # 6. MapInfos.json (Map names in editor / display)
+    map_infos_fp = data_dir / "MapInfos.json"
+    if map_infos_fp.is_file():
+        map_infos = _load_json(map_infos_fp)
+        if isinstance(map_infos, list):
+            for info_rec in map_infos:
+                if isinstance(info_rec, dict):
+                    _add_if_valid(collected, info_rec.get("name"))
+
+    # 7. Animations.json
+    anim_fp = data_dir / "Animations.json"
+    if anim_fp.is_file():
+        anims = _load_json(anim_fp)
+        if isinstance(anims, list):
+            for anim in anims:
+                if isinstance(anim, dict):
+                    _add_if_valid(collected, anim.get("name"))
+
     # Preserve order while deduplicating
     return list(dict.fromkeys(collected))

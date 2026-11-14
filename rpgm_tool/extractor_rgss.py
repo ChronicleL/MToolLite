@@ -195,7 +195,8 @@ def mount_rgss(
 ) -> list[Path]:
     """Patch RGSS Data/ files with translations, backing up originals to *.mtoollite.bak."""
     info = target if isinstance(target, GameInfo) else detect_engine(target)
-    translations = load_json_dict(dict_path)
+    raw_tr = load_json_dict(dict_path)
+    translations = {k: ("" if v == "__FILTERED__" else v) for k, v in raw_tr.items()}
     raw_files = _load_rgss_data_files(info)
 
     data_dir = info.data_dir or (info.root_dir / "Data")

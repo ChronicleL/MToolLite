@@ -396,9 +396,20 @@ FILTERED_TAG = "__FILTERED__"
 
 # Language detection regexes
 _RE_CHINESE = re.compile(r"[\u4e00-\u9fff]")
-_RE_JAPANESE_KANA = re.compile(r"[\u3040-\u30ff]")
+_RE_JAPANESE_KANA = re.compile(r"[\u3040-\u30ff\uff65-\uff9f]")
+_RE_CHINESE_PUNCT = re.compile(r"[\u3002\uff0c\uff01\uff1f\uff1a\u201c\u201d\u300a\u300b]")
 _RE_KOREAN = re.compile(r"[\uac00-\ud7af]")
 _RE_LATIN = re.compile(r"[A-Za-z]")
+
+# True Simplified Chinese exclusive characters & distinctive Chinese particles/pronouns
+_ZH_EXCLUSIVE_CHARS = set(
+    "这个们么为还后对发现动机关开问门给从两没就都到让着把过说想看只进头电车风听语请视"
+    "经实长体学题总办处华压单区县团师应张强归戏战标权查写总亲产转传统报争军农"
+    "语说话请记读调谈论议谢谢认设许谁课诸识铁钱铜银钻锁错针铃钩销铭铲"
+    "给练组编级纯细终绝结线续维持维统门闭问间开阔财责败货质贩贵赏赞赐"
+    "顶顺须顾预颁领频题额饭饮饲饱饰饺饼馆"
+    "你您他她它吗吧呢阿哪啥"
+)
 
 
 def detect_language_match(text: str, lang_type: str) -> bool:
@@ -406,8 +417,21 @@ def detect_language_match(text: str, lang_type: str) -> bool:
     if not text:
         return False
     if lang_type == "chinese":
-        # Contains CJK ideographs but no Japanese kana
-        return bool(_RE_CHINESE.search(text)) and not bool(_RE_JAPANESE_KANA.search(text))
+        # If it has Japanese Kana, it is definitively Japanese!
+        if _RE_JAPANESE_KANA.search(text):
+            return False
+        # If it contains Simplified Chinese distinctive characters or pronouns
+        if any(c in _ZH_EXCLUSIVE_CHARS for c in text):
+            return True
+        # If it contains Chinese punctuation and CJK characters
+        if _RE_CHINESE_PUNCT.search(text) and _RE_CHINESE.search(text):
+            return True
+        # If it is a long sentence (>= 12 CJK characters) with no kana
+        cjk_chars = len(_RE_CHINESE.findall(text))
+        if cjk_chars >= 12:
+            return True
+        # Pure Kanji short words (like 'BGM 音量', '音量', '攻撃', '防御', '道具') are Japanese game vocabulary!
+        return False
     if lang_type == "japanese":
         # Kana or CJK with kana
         return bool(_RE_JAPANESE_KANA.search(text))
